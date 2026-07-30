@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+backend/daemon.log
+backend/cookies.txt
+images/
+
+# Binários externos — copiar separadamente antes de buildar (ver build.bat)
+backend/libmpv-2.dll
+backend/node.exe
+
+# Build (PyInstaller)
+backend/build/
+backend/dist/
+backend/YTPlayer-ytdlp.exe

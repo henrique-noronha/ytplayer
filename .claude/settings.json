@@ -1,0 +1,41 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -Confirm:$false }; Start-Sleep -Milliseconds 500; Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Select-Object ProcessId, CommandLine)",
+      "Bash(git check-ignore *)",
+      "Bash(python -c \"import PIL; print\\('Pillow OK, versao', PIL.__version__\\)\")",
+      "Bash(yt-dlp --no-warnings --cookies cookies.txt --js-runtimes node --extractor-args \"youtube:player_client=mweb\" -j --no-download \"https://www.youtube.com/watch?v=q_leEqHKavM\")",
+      "Bash(python -m py_compile backend/mpv_daemon.py)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.ProcessId -eq 23288 } | Select-Object ProcessId, CommandLine)",
+      "PowerShell(Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | ForEach-Object { Write-Output \"PID=$\\($_.ProcessId\\)\"; Write-Output \"CMD=$\\($_.CommandLine\\)\"; Write-Output \"----\" })",
+      "PowerShell(Get-NetTCPConnection -LocalPort 6601,18100 -ErrorAction SilentlyContinue)",
+      "Bash(netstat -ano)",
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\" //V)",
+      "Bash(python -m py_compile backend/main.py)",
+      "Bash(python -m py_compile backend/main.py backend/mpv_daemon.py backend/core/player.py)",
+      "Read(//c//**)",
+      "Bash(cd \"c:\\\\Users\\\\HENRIQUE NORONHA\\\\Documents\\\\ytplayer\\\\backend\" && cp \"/c/Program Files/nodejs/node.exe\" ./node.exe && ls -la node.exe)",
+      "Bash(./node.exe --version)",
+      "Bash(PATH=\"/c/Windows/System32:/c/Windows\" ./node.exe -e \"console.log\\('node standalone funcionando:', process.version\\)\")",
+      "Bash(python -m pip show pyinstaller)",
+      "Bash(python -m PyInstaller --onefile --noconfirm --name YTPlayer-ytdlp --collect-all yt_dlp --collect-all yt_dlp_ejs --console ytdlp_cli.py)",
+      "Bash(./dist/YTPlayer-ytdlp.exe --version)",
+      "Bash(./dist/YTPlayer-ytdlp.exe --no-warnings --cookies cookies.txt --js-runtimes \"node:$\\(pwd\\)/node.exe\" -j --no-download \"https://www.youtube.com/watch?v=jNQXAC9IVRw\")",
+      "Bash(./dist/YTPlayer-ytdlp.exe --no-warnings --cookies cookies.txt --js-runtimes \"node:$\\(pwd\\)/node.exe\" --extractor-args \"youtube:player_client=mweb\" -j --no-download \"https://www.youtube.com/watch?v=q_leEqHKavM\")",
+      "Bash(cd \"c:\\\\Users\\\\HENRIQUE NORONHA\\\\Documents\\\\ytplayer\\\\backend\" && rm -rf build dist *.spec __pycache__ core/__pycache__ && ls -la)",
+      "Bash(cmd //c build.bat)",
+      "Bash(cmd //c \"cd /d C:\\\\Users\\\\HENRIQUE NORONHA\\\\Documents\\\\ytplayer && build.bat\")",
+      "PowerShell(& \"C:\\\\Users\\\\HENRIQUE NORONHA\\\\Documents\\\\ytplayer\\\\build.bat\")",
+      "Bash(xxd \"c:\\\\Users\\\\HENRIQUE NORONHA\\\\Documents\\\\ytplayer\\\\build.bat\")",
+      "PowerShell(Get-Process -Name \"YTPlayer-daemon\" -ErrorAction SilentlyContinue)",
+      "PowerShell(Stop-Process -Force -Confirm:$false)",
+      "Bash(git status *)",
+      "Bash(git add *)"
+    ],
+    "additionalDirectories": [
+      "C:\\Program Files\\nodejs",
+      "C:\\Users\\HENRIQUE NORONHA\\Documents\\ytplayer\\backend"
+    ]
+  }
+}

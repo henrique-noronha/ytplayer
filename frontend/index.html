@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>YTPlayer</title>
+<link rel="stylesheet" href="/static/styles/main.css" />
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">YT<span>Player</span></div>
+  <form id="url-form" class="url-form">
+    <input
+      id="url-input"
+      type="text"
+      placeholder="Cole a URL de um vídeo ou playlist do YouTube…"
+      autocomplete="off"
+    />
+    <button type="submit" class="btn btn-primary">Reproduzir</button>
+  </form>
+</header>
+
+<main class="player-area">
+  <div class="now-playing">
+    <p class="video-title" id="video-title">Nenhum vídeo carregado</p>
+    <p class="status-line">
+      <span class="status-dot" id="status-dot"></span>
+      <span id="status-text">—</span>
+    </p>
+    <p class="connection-status" id="connection-status"></p>
+  </div>
+
+  <div class="progress-row">
+    <span id="time-current" class="time">00:00</span>
+    <input id="seek-bar" type="range" min="0" max="1000" value="0" class="seek-bar" />
+    <span id="time-duration" class="time">--:--</span>
+  </div>
+
+  <div class="controls-row">
+    <div class="transport">
+      <button id="playpause-btn" class="btn btn-icon btn-icon-lg" title="Play/Pause">▶</button>
+      <button id="stop-btn" class="btn btn-icon" title="Parar">⏹</button>
+    </div>
+
+    <div class="volume-control">
+      <span class="volume-icon">🔊</span>
+      <input id="volume-slider" type="range" min="-20" max="6" step="1" value="0" />
+      <span id="volume-label" class="volume-label">0 dB</span>
+    </div>
+
+    <div class="quality-control">
+      <label for="quality-select">Qualidade</label>
+      <select id="quality-select">
+        <option value="auto">Automática</option>
+      </select>
+    </div>
+  </div>
+</main>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
