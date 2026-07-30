@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import socket
 import sys
 import threading
 import time
@@ -88,6 +89,18 @@ reconnect_attempts = 0
 reconnect_timer: Optional[threading.Timer] = None
 last_error_at: Optional[float] = None
 current_is_live = False
+# True assim que o MPV confirma (status "playing") que a URL atual já tocou de verdade
+# ao menos uma vez — distingue "live que caiu" (já tocou) de "link inválido" (nunca tocou).
+has_played_successfully = False
+
+
+def _has_internet(timeout: float = 1.5) -> bool:
+    """Testa conectividade da própria máquina (não do YouTube) via TCP no DNS do Google."""
+    try:
+        socket.create_connection(("8.8.8.8", 53), timeout=timeout).close()
+        return True
+    except OSError:
+        return False
 
 
 def _cancel_reconnect():
@@ -107,6 +120,9 @@ async def lifespan(app: FastAPI):
     loop = asyncio.get_event_loop()
 
     def _on_status(msg: dict):
+        global has_played_successfully
+        if msg.get("playing"):
+            has_played_successfully = True
         last_status.update(msg)
         asyncio.run_coroutine_threadsafe(manager.broadcast(msg), loop)
 
@@ -120,30 +136,59 @@ async def lifespan(app: FastAPI):
             )
             return
 
-        if reason == "error":
+        # Numa live, o demuxer do MPV às vezes reporta "eof" (fim de stream) quando na
+        # verdade é uma queda de rede/sinal — não dá pra confiar que "eof" sempre significa
+        # que a transmissão realmente terminou. Por isso, para lives, trata eof igual a
+        # error (tenta reconectar); para vídeo normal, eof continua sendo fim natural.
+        should_retry = reason == "error" or (reason == "eof" and current_is_live)
+
+        if should_retry:
             now = time.monotonic()
             # Se a última falha foi há muito tempo, trata como um incidente novo (zera o contador)
             if last_error_at is not None and (now - last_error_at) > RECONNECT_RESET_AFTER:
                 reconnect_attempts = 0
             last_error_at = now
 
+            # Distingue "live que já tocava e caiu" de "link que nunca chegou a tocar"
+            # (ex: URL inválida) — a interface mostra uma mensagem diferente para cada caso.
+            never_played = not has_played_successfully
+            # Testa se a MÁQUINA tem internet (não só se o YouTube resolveu) — se não tiver,
+            # a mensagem deve dizer isso em vez de "live caiu"/"link inválido", já que o
+            # problema é local e nenhuma tentativa vai funcionar até a rede voltar.
+            no_internet = not _has_internet()
+
             if current_url and reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
                 reconnect_attempts += 1
                 delay = RECONNECT_DELAYS[min(reconnect_attempts - 1, len(RECONNECT_DELAYS) - 1)]
-                logger.warning(
-                    "Live caiu — tentativa de reconexão %d/%d em %ds: %s",
-                    reconnect_attempts, MAX_RECONNECT_ATTEMPTS, delay, current_url,
-                )
+                if no_internet:
+                    logger.warning(
+                        "Sem internet — tentativa %d/%d em %ds: %s",
+                        reconnect_attempts, MAX_RECONNECT_ATTEMPTS, delay, current_url,
+                    )
+                elif never_played:
+                    logger.warning(
+                        "Falha ao carregar o link — tentativa %d/%d em %ds: %s",
+                        reconnect_attempts, MAX_RECONNECT_ATTEMPTS, delay, current_url,
+                    )
+                else:
+                    logger.warning(
+                        "Live caiu — tentativa de reconexão %d/%d em %ds: %s",
+                        reconnect_attempts, MAX_RECONNECT_ATTEMPTS, delay, current_url,
+                    )
                 asyncio.run_coroutine_threadsafe(manager.broadcast({
                     "event": "reconnecting",
                     "attempt": reconnect_attempts,
                     "max_attempts": MAX_RECONNECT_ATTEMPTS,
                     "delay": delay,
+                    "never_played": never_played,
+                    "no_internet": no_internet,
                 }), loop)
                 player_instance.show_standby()
 
+                # Não esconde a tela de espera antes de tentar de novo — ela fica parada
+                # (sem piscar) durante todas as tentativas; só some quando o MPV confirma
+                # um carregamento bem-sucedido de verdade (evento file-loaded no daemon).
                 def _do_reconnect(url=current_url):
-                    player_instance.hide_standby()
                     player_instance.play(url, is_live=current_is_live)
 
                 reconnect_timer = threading.Timer(delay, _do_reconnect)
@@ -153,7 +198,11 @@ async def lifespan(app: FastAPI):
                 logger.error("Reconexão falhou após %d tentativas — desistindo", reconnect_attempts)
                 player_instance.show_standby()
                 asyncio.run_coroutine_threadsafe(
-                    manager.broadcast({"event": "reconnect_failed"}), loop
+                    manager.broadcast({
+                        "event": "reconnect_failed",
+                        "never_played": never_played,
+                        "no_internet": no_internet,
+                    }), loop
                 )
         else:
             reconnect_attempts = 0
@@ -242,7 +291,7 @@ async def _probe_and_prepare(url: str) -> bool:
 
 
 async def _handle_command(cmd: dict):
-    global current_url
+    global current_url, has_played_successfully
     action = cmd.get("action")
     logger.info("Comando recebido: %s", action)
 
@@ -252,6 +301,10 @@ async def _handle_command(cmd: dict):
             _cancel_reconnect()
             current_url = url
             is_live = await _probe_and_prepare(url)
+            # Só zera aqui, logo antes do play() de verdade — se zerasse antes do probe
+            # (que demora alguns segundos), um status "playing" ainda chegando do vídeo
+            # ANTERIOR (que só é trocado agora) marcaria errado que esta URL nova já tocou.
+            has_played_successfully = False
             player_instance.play(url, is_live=is_live)
 
     elif action == "toggle_pause":
@@ -307,13 +360,20 @@ def _run_server():
     uvicorn.run(app, host="0.0.0.0", port=PORT, reload=False, log_level="info", log_config=None)
 
 
+MIN_SPLASH_SECONDS = 4.0  # tempo mínimo de exibição do splash, mesmo se o servidor subir rápido
+
+
 def _wait_and_navigate(window):
     import socket
+    start = time.time()
     for _ in range(60):
         time.sleep(0.5)
         try:
             s = socket.create_connection(("localhost", PORT), timeout=1)
             s.close()
+            remaining = MIN_SPLASH_SECONDS - (time.time() - start)
+            if remaining > 0:
+                time.sleep(remaining)
             window.load_url(f"http://localhost:{PORT}")
             return
         except OSError:
@@ -491,7 +551,7 @@ if __name__ == "__main__":
     _SPLASH = """<!DOCTYPE html><html><head><style>
 *{box-sizing:border-box;margin:0;padding:0}
 body{background:#0f1117;display:flex;flex-direction:column;align-items:center;
-  justify-content:center;height:100vh;gap:24px;
+  justify-content:center;height:100vh;gap:24px;position:relative;
   font-family:'Segoe UI',system-ui,sans-serif;color:#e5e7eb}
 .logo{font-size:28px;font-weight:700;letter-spacing:.02em}
 .logo span{color:#4f8ef7}
@@ -503,19 +563,36 @@ body{background:#0f1117;display:flex;flex-direction:column;align-items:center;
 .dot:nth-child(4){animation-delay:.54s}
 @keyframes wave{0%,100%{transform:translateY(0);opacity:1}50%{transform:translateY(-8px);opacity:.3}}
 .lbl{font-size:11px;color:#6b7280;letter-spacing:.1em;text-transform:uppercase}
+.credit{position:absolute;bottom:28px;left:0;right:0;text-align:center;
+  font-size:12px;color:#4b5563;letter-spacing:.03em}
 </style></head><body>
 <div class="logo">YT<span>Player</span></div>
 <div class="loader"><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div></div>
 <span class="lbl">Iniciando servidor…</span>
+<span class="credit">Desenvolvido por: Henrique Noronha Fernandes, para TV Assembleia do Tocantins</span>
 </body></html>"""
+
+    def _center(win_w: int, win_h: int) -> tuple[int, int]:
+        try:
+            import ctypes
+            sw = ctypes.windll.user32.GetSystemMetrics(0)
+            sh = ctypes.windll.user32.GetSystemMetrics(1)
+            return max(0, (sw - win_w) // 2), max(0, (sh - win_h) // 2)
+        except Exception:
+            return 0, 0
+
+    _WIN_W, _WIN_H = 1100, 760
+    _cx, _cy = _center(_WIN_W, _WIN_H)
 
     threading.Thread(target=_run_server, daemon=True).start()
 
     window = webview.create_window(
         "YTPlayer",
         html=_SPLASH,
-        width=1100,
-        height=760,
+        width=_WIN_W,
+        height=_WIN_H,
+        x=_cx,
+        y=_cy,
         min_size=(760, 560),
     )
     window.events.closing += _on_closing

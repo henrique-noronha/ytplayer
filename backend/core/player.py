@@ -167,8 +167,8 @@ class Player:
     def set_quality(self, quality: str):
         self._send({"action": "set_quality", "quality": quality})
 
-    def show_standby(self, message: str = "Voltaremos em breve..."):
-        self._send({"action": "show_standby", "message": message})
+    def show_standby(self):
+        self._send({"action": "show_standby"})
 
     def hide_standby(self):
         self._send({"action": "hide_standby"})

@@ -11,7 +11,7 @@ Comandos aceitos:
     {"action": "set_volume", "volume": 100}   -- 0-200 (100 = 0 dB, 200 = +6 dB)
     {"action": "set_quality","quality": "auto"|"<altura em px, ex: '1080'>"}
     {"action": "get_state"}
-    {"action": "show_standby", "message": "Voltaremos em breve..."}  -- tela de espera (imagem + texto)
+    {"action": "show_standby"}  -- tela de espera (imagem de images/, em tela cheia)
     {"action": "hide_standby"}
     {"action": "quit_daemon"}  -- encerra o MPV e finaliza o processo do daemon (não sobrevive a este)
 
@@ -62,9 +62,9 @@ COOKIES_PATH = _DATA_DIR / "cookies.txt"
 NODE_EXE_PATH = _DATA_DIR / "node.exe"
 YTDLP_EXE_PATH = _DATA_DIR / "YTPlayer-ytdlp.exe"
 
-# Tela de espera (imagem + texto) exibida enquanto uma live está reconectando.
+# Tela de espera (imagem de images/, já com o texto embutido) exibida enquanto
+# uma live está reconectando.
 STANDBY_SLOT = "9"
-STANDBY_MESSAGE_DEFAULT = "Voltaremos em breve..."
 
 _LOG_PATH = _DATA_DIR / "daemon.log"
 logging.basicConfig(
@@ -185,67 +185,39 @@ def _find_standby_image() -> Optional[Path]:
     return None
 
 
-def _load_standby_font(size: int):
-    from PIL import ImageFont
-    for name in ("segoeuib.ttf", "segoeui.ttf", "arial.ttf", "verdana.ttf"):
-        try:
-            return ImageFont.truetype(name, size)
-        except Exception:
-            pass
-    return ImageFont.load_default()
+def _render_standby(osd_w: int, osd_h: int) -> Optional[tuple]:
+    """Renderiza a imagem de espera cobrindo toda a tela OSD (a imagem já traz o texto).
 
+    Escala para preencher a tela inteira ("cover"): sem tarjas, cortando o mínimo
+    necessário das bordas em vez de distorcer a imagem.
 
-def _contrasting_text_color(rgb) -> tuple:
-    r, g, b = rgb[0], rgb[1], rgb[2]
-    luminance = 0.299 * r + 0.587 * g + 0.114 * b
-    return (20, 30, 46, 255) if luminance > 140 else (255, 255, 255, 255)
-
-
-def _render_standby(osd_w: int, osd_h: int, message: str) -> Optional[tuple]:
-    """Renderiza a imagem de espera + texto centralizados, cobrindo toda a tela OSD.
-
-    Retorna (bgra_bytes, width, height) ou None se Pillow não estiver disponível.
+    Retorna (bgra_bytes, width, height) ou None se Pillow não estiver disponível
+    ou nenhuma imagem for encontrada.
     """
     try:
-        from PIL import Image, ImageDraw
+        from PIL import Image
     except ImportError:
         logger.warning("Pillow não instalado — não é possível exibir a tela de espera")
         return None
 
-    canvas = Image.new("RGBA", (osd_w, osd_h), (15, 17, 23, 255))
-
     img_path = _find_standby_image()
-    if img_path is not None:
-        try:
-            logo = Image.open(str(img_path)).convert("RGBA")
-            bg_color = logo.convert("RGB").getpixel((0, 0))
-            canvas = Image.new("RGBA", (osd_w, osd_h), (*bg_color, 255))
+    if img_path is None:
+        return None
 
-            max_w = int(osd_w * 0.6)
-            max_h = int(osd_h * 0.55)
-            ratio = min(max_w / logo.width, max_h / logo.height, 1.0)
-            new_w = max(1, int(logo.width * ratio))
-            new_h = max(1, int(logo.height * ratio))
-            logo = logo.resize((new_w, new_h), Image.LANCZOS)
+    try:
+        logo = Image.open(str(img_path)).convert("RGBA")
+        ratio = max(osd_w / logo.width, osd_h / logo.height)
+        new_w = max(1, round(logo.width * ratio))
+        new_h = max(1, round(logo.height * ratio))
+        logo = logo.resize((new_w, new_h), Image.LANCZOS)
 
-            logo_x = (osd_w - new_w) // 2
-            logo_y = int(osd_h * 0.46) - new_h // 2
-            canvas.alpha_composite(logo, (logo_x, logo_y))
-        except Exception as exc:
-            logger.warning("Falha ao carregar imagem de espera %s: %s", img_path, exc)
-
-    draw = ImageDraw.Draw(canvas)
-    font_size = max(16, int(osd_h * 0.045))
-    font = _load_standby_font(font_size)
-
-    bbox = draw.textbbox((0, 0), message, font=font)
-    text_w = bbox[2] - bbox[0]
-    text_x = (osd_w - text_w) // 2 - bbox[0]
-    text_y = int(osd_h * 0.74) - bbox[1]
-
-    sample = canvas.getpixel((osd_w // 2, min(osd_h - 1, int(osd_h * 0.74))))
-    text_color = _contrasting_text_color(sample)
-    draw.text((text_x, text_y), message, font=font, fill=text_color)
+        canvas = Image.new("RGBA", (osd_w, osd_h), (0, 0, 0, 255))
+        x = (osd_w - new_w) // 2
+        y = (osd_h - new_h) // 2
+        canvas.paste(logo, (x, y))
+    except Exception as exc:
+        logger.warning("Falha ao carregar imagem de espera %s: %s", img_path, exc)
+        return None
 
     rgba = canvas.tobytes()
     bgra = bytearray(len(rgba))
@@ -291,6 +263,28 @@ def _move_window_to_secondary(window_title: str) -> None:
                 window_title, width, height, left, top)
 
 
+def _send_window_to_back(window_title: str) -> None:
+    """Manda a janela do MPV para trás de todas as outras (sem monitor secundário,
+    a janela fica atrás da interface em vez de abrir na frente e tomar o foco)."""
+    import ctypes
+
+    hwnd = None
+    for _ in range(30):
+        hwnd = ctypes.windll.user32.FindWindowW(None, window_title)
+        if hwnd:
+            break
+        time.sleep(0.1)
+    if not hwnd:
+        logger.warning("Janela '%s' não encontrada para mandar para trás", window_title)
+        return
+
+    # HWND_BOTTOM=1, SWP_NOMOVE=0x0002, SWP_NOSIZE=0x0001, SWP_NOACTIVATE=0x0010
+    ctypes.windll.user32.SetWindowPos(
+        hwnd, ctypes.c_int(1), 0, 0, 0, 0, 0x0002 | 0x0001 | 0x0010
+    )
+    logger.info("Janela '%s' enviada para trás (monitor único)", window_title)
+
+
 class MPVDaemon:
     def __init__(self):
         self._mpv = None
@@ -304,6 +298,7 @@ class MPVDaemon:
         self._quality = "auto"
         self._is_live = False
         self._window_positioned = False  # move_to_secondary() só roda uma vez por sessão MPV
+        self._file_loaded = False  # só True após o MPV confirmar (file-loaded) que carregou de verdade
 
     def _build_raw_options(self) -> str:
         """Monta --ytdl-raw-options: cookies, runtime JS, e o cliente mweb para lives.
@@ -343,6 +338,10 @@ class MPVDaemon:
             log_handler=self._mpv_log,
             loglevel="warn",
             volume_max=200,
+            # Sem isso, o MPV pode ficar tentando uma conexão de rede morta por bastante
+            # tempo (imagem congelada) antes de desistir e disparar end-file — atrasando
+            # a exibição da tela de espera quando a live realmente cai.
+            network_timeout=10,
         )
 
         if has_secondary:
@@ -382,6 +381,10 @@ class MPVDaemon:
         # posiciona no monitor correto logo ao inicializar.
         if has_secondary:
             threading.Thread(target=self._move_to_secondary, daemon=True).start()
+        else:
+            # Sem monitor secundário, a janela do MPV abriria na frente da interface
+            # (foco padrão de janela nova) — manda para trás para não cobri-la.
+            threading.Thread(target=lambda: _send_window_to_back("YTPlayer"), daemon=True).start()
 
         self._mpv.observe_property("time-pos", self._on_time_pos)
         self._mpv.observe_property("duration", self._on_duration)
@@ -389,14 +392,20 @@ class MPVDaemon:
 
         @self._mpv.event_callback("file-loaded")
         def _file_loaded(event):
+            self._file_loaded = True  # confirmação real de que o conteúdo carregou
             self._remove_standby()  # conteúdo real carregou — some com a tela de espera
             if has_secondary and not self._window_positioned:
                 threading.Thread(target=self._move_to_secondary, daemon=True).start()
+            elif not has_secondary:
+                # Cada novo clipe pode trazer a janela de volta para frente — reforça
+                # que ela deve continuar atrás da interface.
+                threading.Thread(target=lambda: _send_window_to_back("YTPlayer"), daemon=True).start()
 
         @self._mpv.event_callback("end-file")
         def _end_file(event):
             if self._mpv_dead:
                 return
+            self._file_loaded = False
             reason = _parse_end_reason(event)
             logger.info("end-file reason=%s", reason)
             self._broadcast_sync({"event": "end-file", "reason": reason})
@@ -428,11 +437,11 @@ class MPVDaemon:
         except Exception:
             return 1920, 1080
 
-    def _apply_standby(self, message: str):
+    def _apply_standby(self):
         if not self._mpv or self._mpv_dead:
             return
         osd_w, osd_h = self._osd_dims()
-        result = _render_standby(osd_w, osd_h, message)
+        result = _render_standby(osd_w, osd_h)
         if result is None:
             return
         bgra_bytes, w, h = result
@@ -446,7 +455,7 @@ class MPVDaemon:
             self._mpv.command(
                 "overlay-add", STANDBY_SLOT, "0", "0", str(tmp), "0", "bgra", str(w), str(h), str(w * 4),
             )
-            logger.info("Tela de espera exibida: %r", message)
+            logger.info("Tela de espera exibida")
         except Exception as exc:
             logger.warning("overlay-add (standby) falhou: %s", exc)
 
@@ -474,14 +483,14 @@ class MPVDaemon:
 
     def _status_snapshot(self) -> dict:
         paused = False
-        playing = False
+        # "playing" só é True após o MPV confirmar (file-loaded) que o conteúdo carregou
+        # de verdade — mpv.path fica setado assim que o loadfile é chamado, bem antes de
+        # se saber se a URL vai resolver com sucesso, o que faria a UI mostrar "Reproduzindo"
+        # por engano em links inválidos/lives que ainda nem começaram a carregar.
+        playing = self._file_loaded
         if self._mpv and not self._mpv_dead:
             try:
                 paused = bool(self._mpv.pause)
-            except Exception:
-                pass
-            try:
-                playing = self._mpv.path is not None
             except Exception:
                 pass
         return {
@@ -565,6 +574,7 @@ class MPVDaemon:
                 logger.warning("ytdl options: %s", exc)
             self._duration = None
             self._title = None
+            self._file_loaded = False
             self._mpv.command("loadfile", _to_ytdl_url(url), "replace")
             self._mpv.pause = False
             logger.info("play: %s (qualidade=%s, is_live=%s)", url, self._quality, self._is_live)
@@ -583,6 +593,7 @@ class MPVDaemon:
             self._position = 0.0
             self._duration = None
             self._title = None
+            self._file_loaded = False
 
         elif action == "seek":
             if self._mpv and not self._mpv_dead:
@@ -623,13 +634,13 @@ class MPVDaemon:
                 if current_path:
                     self._duration = None
                     self._title = None
+                    self._file_loaded = False
                     self._mpv.command("loadfile", current_path, "replace")
                     self._mpv.pause = False
                     logger.info("Recarregando com nova qualidade: %s", current_path)
 
         elif action == "show_standby":
-            message = str(cmd.get("message") or STANDBY_MESSAGE_DEFAULT)
-            self._apply_standby(message)
+            self._apply_standby()
 
         elif action == "hide_standby":
             self._remove_standby()
