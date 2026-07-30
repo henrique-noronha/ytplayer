@@ -178,14 +178,15 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  font-size: 13px;
+  gap: 10px;
+  font-size: 17px;
+  font-weight: 500;
   color: var(--text-dim);
 }
 
 .status-dot {
-  width: 8px;
-  height: 8px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   background: var(--text-faint);
   flex: none;
@@ -207,11 +208,14 @@ body {
 }
 
 .connection-status {
-  font-size: 12px;
+  font-size: 17px;
   font-weight: 600;
   display: none;
-  padding: 6px 14px;
-  border-radius: 20px;
+  padding: 10px 20px;
+  border-radius: 12px;
+  max-width: 90%;
+  text-align: center;
+  line-height: 1.4;
 }
 
 .connection-status.visible {

@@ -31,7 +31,10 @@
       "PowerShell(Get-Process -Name \"YTPlayer-daemon\" -ErrorAction SilentlyContinue)",
       "PowerShell(Stop-Process -Force -Confirm:$false)",
       "Bash(git status *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(rm -f \"C:\\\\Users\\\\HENRIQUE NORONHA\\\\Documents\\\\ytplayer\\\\standby_preview_16-9.png\" \"C:\\\\Users\\\\HENRIQUE NORONHA\\\\Documents\\\\ytplayer\\\\standby_preview_notebook.png\")",
+      "Bash(rm -rf __pycache__ core/__pycache__)",
+      "Bash(curl -s http://127.0.0.1:18100/api/ping)"
     ],
     "additionalDirectories": [
       "C:\\Program Files\\nodejs",

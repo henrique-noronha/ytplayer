@@ -34,7 +34,7 @@ function connect() {
     const msg = JSON.parse(ev.data);
     if (msg.event === 'status') applyStatus(msg);
     else if (msg.event === 'reconnecting') applyReconnecting(msg);
-    else if (msg.event === 'reconnect_failed') applyReconnectFailed();
+    else if (msg.event === 'reconnect_failed') applyReconnectFailed(msg);
     else if (msg.event === 'end-file' && msg.reason === 'stop') clearConnectionStatus();
     else if (msg.event === 'available_qualities') applyAvailableQualities(msg);
   });
@@ -60,14 +60,29 @@ function fmtTime(sec) {
 }
 
 function applyReconnecting(msg) {
-  els.connectionStatus.textContent =
-    `Live caiu — tentando reconectar (tentativa ${msg.attempt}/${msg.max_attempts}) em ${msg.delay}s…`;
+  let text;
+  if (msg.no_internet) {
+    text = `Sem conexão com a internet — verifique sua rede (tentativa ${msg.attempt}/${msg.max_attempts}) em ${msg.delay}s…`;
+  } else if (msg.never_played) {
+    text = `Link inválido ou vídeo indisponível — tentando novamente (tentativa ${msg.attempt}/${msg.max_attempts}) em ${msg.delay}s…`;
+  } else {
+    text = `Live caiu — tentando reconectar (tentativa ${msg.attempt}/${msg.max_attempts}) em ${msg.delay}s…`;
+  }
+  els.connectionStatus.textContent = text;
   els.connectionStatus.classList.remove('status-error');
   els.connectionStatus.classList.add('status-warning', 'visible');
 }
 
-function applyReconnectFailed() {
-  els.connectionStatus.textContent = 'Não foi possível reconectar à live após várias tentativas.';
+function applyReconnectFailed(msg) {
+  let text;
+  if (msg.no_internet) {
+    text = 'Sem conexão com a internet — verifique sua rede.';
+  } else if (msg.never_played) {
+    text = 'Não foi possível reproduzir este link — verifique se a URL está correta.';
+  } else {
+    text = 'Não foi possível reconectar à live após várias tentativas.';
+  }
+  els.connectionStatus.textContent = text;
   els.connectionStatus.classList.remove('status-warning');
   els.connectionStatus.classList.add('status-error', 'visible');
 }
